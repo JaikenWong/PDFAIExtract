@@ -33,7 +33,7 @@ cp .env.example .env
 
 ## 配置
 
-复制 `config.example.json` 为 `config.json` 并配置提取参数：
+复制 `config.example.json` 为 `config.json` 并配置提取参数。也可直接用 `.env` 覆盖：
 
 ```json
 {
@@ -47,6 +47,19 @@ cp .env.example .env
   }
 }
 ```
+
+`provider` 可选 `openai`、`anthropic`、`xunfei`。
+
+环境变量优先级更高：
+
+```bash
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o
+LLM_API_KEY=...
+LLM_BASE_URL=https://api.openai.com/v1
+```
+
+Claude 走 `provider=anthropic`，`LLM_API_KEY` 可直接放 `ANTHROPIC_API_KEY`。
 
 ## 使用
 

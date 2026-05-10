@@ -1,6 +1,8 @@
 import json
 import re
 import logging
+
+from anthropic import Anthropic
 from openai import OpenAI
 from models.schemas import CertificateInfo, ExtractionResult
 from config import get_config
@@ -12,17 +14,40 @@ class LLMExtractor:
     def __init__(self):
         cfg = get_config()["llm"]
         self.provider = cfg["provider"]
+        self.model = cfg.get("model", "astron-code-latest")
+        self.vision_model = cfg.get("vision_model", self.model)
 
         api_key = cfg.get("api_key", "")
         api_secret = cfg.get("api_secret", "")
-        if api_secret:
-            combined_key = f"{api_key}:{api_secret}"
+        if self.provider == "anthropic":
+            self.client = Anthropic(
+                api_key=api_key or None,
+                base_url=cfg.get("base_url") or None,
+            )
+        elif self.provider in {"openai", "azure_openai"}:
+            combined_key = f"{api_key}:{api_secret}" if api_secret else api_key
+            self.client = OpenAI(api_key=combined_key or None, base_url=cfg.get("base_url") or None)
         else:
-            combined_key = api_key
+            raise ValueError(f"Unsupported llm provider: {self.provider}")
 
-        self.client = OpenAI(api_key=combined_key, base_url=cfg.get("base_url"))
-        self.model = cfg.get("model", "astron-code-latest")
-        self.vision_model = cfg.get("vision_model", self.model)
+    def _extract_text_from_response(self, response) -> str:
+        content = getattr(response, "content", None)
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                text = getattr(block, "text", None)
+                if text:
+                    parts.append(text)
+            if parts:
+                return "".join(parts)
+        choice_content = getattr(getattr(response, "choices", [None])[0], "message", None)
+        if choice_content is not None:
+            text = getattr(choice_content, "content", None)
+            if isinstance(text, str):
+                return text
+        return ""
 
     def _build_result(self, content: str, file_name: str, page_num: int,
                       method: str, text_fallback: str = None) -> ExtractionResult:
@@ -73,12 +98,21 @@ Text:
 {text}"""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0,
-            )
-            content = response.choices[0].message.content
+            if self.provider == "anthropic":
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=1024,
+                    temperature=0,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                content = self._extract_text_from_response(response)
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                )
+                content = response.choices[0].message.content
         except Exception as e:
             logger.error(f"LLM text extraction failed: {e}")
             return ExtractionResult(
@@ -106,18 +140,40 @@ Text:
 Pay attention to text in logos, stamps, seals, and tables. If a field is not found, use null."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.vision_model,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
-                    ],
-                }],
-                temperature=0,
-            )
-            content = response.choices[0].message.content
+            if self.provider == "anthropic":
+                response = self.client.messages.create(
+                    model=self.vision_model,
+                    max_tokens=1024,
+                    temperature=0,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": image_base64,
+                                },
+                            },
+                        ],
+                    }],
+                )
+                content = self._extract_text_from_response(response)
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.vision_model,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
+                        ],
+                    }],
+                    temperature=0,
+                )
+                content = response.choices[0].message.content
         except Exception as e:
             logger.error(f"LLM vision extraction failed: {e}")
             return ExtractionResult(

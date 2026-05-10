@@ -34,6 +34,8 @@ class CertificateExtractor:
                     result = self.llm_extractor.extract_from_text(text, file_name, page_num)
                 else:
                     print(f"  Text insufficient, using vision...")
+                    if not image_base64:
+                        raise ValueError("Missing page image for vision extraction")
                     result = self.llm_extractor.extract_from_image(image_base64, file_name, page_num)
 
                 results.append(result)
@@ -55,7 +57,7 @@ class CertificateExtractor:
     def _check_missing_fields(self, cert_info) -> List[str]:
         missing = []
         for field_name, value in cert_info.model_dump().items():
-            if value is None and field_name not in ["additional_info", "raw_text"]:
+            if value is None and field_name != "additional_info":
                 missing.append(field_name)
         return missing
 

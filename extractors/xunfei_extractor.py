@@ -31,6 +31,7 @@ class XunfeiExtractor:
         url = f"{self.base_url}/chat/completions"
         resp = requests.post(url, json=payload, headers=self._get_headers(), timeout=_API_TIMEOUT)
         logger.debug(f"API response status: {resp.status_code}")
+        resp.raise_for_status()
         try:
             result = resp.json()
             if "choices" in result:
