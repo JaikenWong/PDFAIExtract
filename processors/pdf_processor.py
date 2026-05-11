@@ -7,9 +7,15 @@ logger = logging.getLogger(__name__)
 
 
 class PDFProcessor:
-    def __init__(self, dpi: int = 150, min_text_length: int = 100):
+    def __init__(
+        self,
+        dpi: int = 150,
+        min_text_length: int = 100,
+        min_text_alpha_ratio: float = 0.22,
+    ):
         self.dpi = dpi
         self.min_text_length = min_text_length
+        self.min_text_alpha_ratio = min_text_alpha_ratio
 
     def extract_text(self, pdf_path: str, page_num: int) -> str:
         try:
@@ -23,9 +29,24 @@ class PDFProcessor:
             logger.error(f"Failed to extract text from {pdf_path} page {page_num}: {e}")
             return ""
 
+    @staticmethod
+    def meaningful_char_ratio(text: str) -> float:
+        clean = "".join(text.split())
+        if not clean:
+            return 0.0
+        meaningful = 0
+        for c in clean:
+            if c.isalnum():
+                meaningful += 1
+            elif "\u4e00" <= c <= "\u9fff":
+                meaningful += 1
+        return meaningful / len(clean)
+
     def is_text_sufficient(self, text: str) -> bool:
         clean = "".join(text.split())
-        return len(clean) >= self.min_text_length
+        if len(clean) < self.min_text_length:
+            return False
+        return self.meaningful_char_ratio(text) >= self.min_text_alpha_ratio
 
     def page_to_image_base64(self, pdf_path: str, page_num: int) -> Optional[str]:
         try:

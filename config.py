@@ -21,14 +21,19 @@ _DEFAULT_CONFIG = {
         "vision_base_url": "",
         "vision_api_key": "",
         "vision_model_id": "",
+        "azure_api_version": "2024-02-15-preview",
+        "azure_endpoint": "",
     },
     "extraction": {
         "min_text_length": 100,
+        "min_text_alpha_ratio": 0.22,
         "raw_text_preview": 500,
         "max_retries": 3,
         "retry_delay": 1.0,
         "concurrent_workers": 4,
         "dpi": 150,
+        "max_upload_bytes": 52428800,
+        "vision_fallback_min_chars": 30,
     },
 }
 
@@ -54,14 +59,19 @@ def _env_config() -> dict:
         "vision_base_url": os.getenv("LLM_VISION_BASE_URL"),
         "vision_api_key": os.getenv("LLM_VISION_API_KEY"),
         "vision_model_id": os.getenv("LLM_VISION_MODEL_ID"),
+        "azure_api_version": os.getenv("LLM_AZURE_API_VERSION"),
+        "azure_endpoint": os.getenv("LLM_AZURE_ENDPOINT"),
     }
     extraction = {
         "min_text_length": os.getenv("MIN_TEXT_LENGTH"),
+        "min_text_alpha_ratio": os.getenv("MIN_TEXT_ALPHA_RATIO"),
         "raw_text_preview": os.getenv("RAW_TEXT_PREVIEW"),
         "max_retries": os.getenv("MAX_RETRIES"),
         "retry_delay": os.getenv("RETRY_DELAY"),
         "concurrent_workers": os.getenv("CONCURRENT_WORKERS"),
         "dpi": os.getenv("DPI"),
+        "max_upload_bytes": os.getenv("MAX_UPLOAD_BYTES"),
+        "vision_fallback_min_chars": os.getenv("VISION_FALLBACK_MIN_CHARS"),
     }
 
     env_cfg = {
@@ -72,9 +82,17 @@ def _env_config() -> dict:
     for key, value in extraction.items():
         if value in (None, ""):
             continue
-        if key in {"min_text_length", "raw_text_preview", "max_retries", "concurrent_workers", "dpi"}:
+        if key in {
+            "min_text_length",
+            "raw_text_preview",
+            "max_retries",
+            "concurrent_workers",
+            "dpi",
+            "max_upload_bytes",
+            "vision_fallback_min_chars",
+        }:
             env_cfg["extraction"][key] = int(value)
-        elif key == "retry_delay":
+        elif key in {"retry_delay", "min_text_alpha_ratio"}:
             env_cfg["extraction"][key] = float(value)
 
     return env_cfg
