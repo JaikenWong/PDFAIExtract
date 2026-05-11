@@ -24,9 +24,16 @@ class LLMExtractor:
                 api_key=api_key or None,
                 base_url=cfg.get("base_url") or None,
             )
+            self.vision_client = self.client
         elif self.provider in {"openai", "azure_openai"}:
             combined_key = f"{api_key}:{api_secret}" if api_secret else api_key
             self.client = OpenAI(api_key=combined_key or None, base_url=cfg.get("base_url") or None)
+            
+            vision_key = cfg.get("vision_api_key") or combined_key
+            vision_url = cfg.get("vision_base_url") or cfg.get("base_url")
+            vision_model_id = cfg.get("vision_model_id") or self.vision_model
+            self.vision_client = OpenAI(api_key=vision_key or None, base_url=vision_url or None)
+            self.vision_model = vision_model_id
         else:
             raise ValueError(f"Unsupported llm provider: {self.provider}")
 
@@ -58,6 +65,12 @@ class LLMExtractor:
                 data = json.loads(json_match.group())
             else:
                 data = {}
+            
+            for key in ["product_model", "manufacturer", "product_name", "issuing_authority", 
+                        "certification_type", "country", "language"]:
+                if isinstance(data.get(key), list):
+                    data[key] = ", ".join(str(v) for v in data[key] if v)
+            
             cert_info = CertificateInfo(**data)
         except (json.JSONDecodeError, TypeError, ValueError) as e:
             logger.warning(f"Failed to parse LLM response: {e}")
@@ -162,7 +175,7 @@ Pay attention to text in logos, stamps, seals, and tables. If a field is not fou
                 )
                 content = self._extract_text_from_response(response)
             else:
-                response = self.client.chat.completions.create(
+                response = self.vision_client.chat.completions.create(
                     model=self.vision_model,
                     messages=[{
                         "role": "user",

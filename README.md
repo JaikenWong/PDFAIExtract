@@ -48,7 +48,7 @@ cp .env.example .env
 }
 ```
 
-`provider` 可选 `openai`、`anthropic`、`xunfei`。
+`provider` 可选 `openai`、`anthropic`。
 
 环境变量优先级更高：
 

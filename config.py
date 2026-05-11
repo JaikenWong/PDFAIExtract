@@ -18,6 +18,9 @@ _DEFAULT_CONFIG = {
         "api_key": "",
         "api_secret": "",
         "base_url": "",
+        "vision_base_url": "",
+        "vision_api_key": "",
+        "vision_model_id": "",
     },
     "extraction": {
         "min_text_length": 100,
@@ -48,6 +51,9 @@ def _env_config() -> dict:
         "api_key": os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
         "api_secret": os.getenv("LLM_API_SECRET"),
         "base_url": os.getenv("LLM_BASE_URL"),
+        "vision_base_url": os.getenv("LLM_VISION_BASE_URL"),
+        "vision_api_key": os.getenv("LLM_VISION_API_KEY"),
+        "vision_model_id": os.getenv("LLM_VISION_MODEL_ID"),
     }
     extraction = {
         "min_text_length": os.getenv("MIN_TEXT_LENGTH"),
