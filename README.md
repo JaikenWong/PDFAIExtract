@@ -63,6 +63,8 @@ Claude 走 `provider=anthropic`，`LLM_API_KEY` 可直接放 `ANTHROPIC_API_KEY`
 
 ## 使用
 
+### Python 调用
+
 单文件处理：
 ```python
 from main import CertificateExtractor
@@ -76,6 +78,90 @@ extractor.save_results(results, "output.json")
 ```python
 extractor.process_directory("pdfs/", "output/")
 ```
+
+### FastAPI 接口
+
+启动服务：
+```bash
+uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+访问 http://localhost:8000/docs 查看交互式 API 文档。
+
+#### 1. 上传 PDF 文件
+
+**请求：**
+```bash
+curl -X POST "http://localhost:8000/extract" \
+  -F "file=@certificate.pdf"
+```
+
+**响应：**
+```json
+{
+  "success": true,
+  "results": [
+    {
+      "file_name": "certificate.pdf",
+      "page_number": 1,
+      "extraction_method": "text",
+      "confidence": 0.9,
+      "data": {
+        "certificate_number": "2026010708845104",
+        "product_name": "智能吸尘器",
+        "product_model": "RLZ83DE",
+        "manufacturer": "追觅贸易（天津）有限公司",
+        "issuing_authority": null,
+        "issue_date": "2026-01-28",
+        "expiry_date": "2031-01-27",
+        "certification_type": "3C",
+        "standards": ["GB 17625.1-2022", "GB 4343.1-2024"],
+        "country": "CN",
+        "language": "zh"
+      },
+      "raw_text": "..."
+    }
+  ],
+  "error": null
+}
+```
+
+#### 2. Base64 编码的 PDF
+
+**请求：**
+```bash
+curl -X POST "http://localhost:8000/extract/base64" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filename": "certificate.pdf",
+    "content_base64": "JVBERi0xLjQKJeLjz9..."
+  }'
+```
+
+**响应：** 同上
+
+#### 3. 健康检查
+
+```bash
+curl http://localhost:8000/health
+```
+
+响应：`{"status": "ok"}`
+
+#### 错误响应
+
+```json
+{
+  "success": false,
+  "results": [],
+  "error": "错误信息"
+}
+```
+
+常见错误码：
+- `400` - 文件格式错误（非 PDF）
+- `413` - 文件过大（默认最大 50MB）
+- `500` - 服务器内部错误
 
 ## 项目结构
 
