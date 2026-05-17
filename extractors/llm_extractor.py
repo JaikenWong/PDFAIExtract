@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 from anthropic import Anthropic
 from openai import AzureOpenAI, OpenAI
 
-from models.schemas import CertificateInfo, ExtractionResult
+from models.schemas import CertificateInfo, ExtractionResult, get_extraction_fields
 from config import get_config
 
 logger = logging.getLogger(__name__)
@@ -160,11 +160,11 @@ class LLMExtractor:
                 parts = re.split(r"[,;|]", data["standards"])
                 data["standards"] = [p.strip() for p in parts if p.strip()] or None
 
-            for key in ["product_model", "manufacturer", "product_name", "issuing_authority", 
+            for key in ["product_model", "manufacturer", "product_name", "issuing_authority",
                         "certification_type", "country", "language"]:
                 if isinstance(data.get(key), list):
                     data[key] = ", ".join(str(v) for v in data[key] if v)
-            
+
             cert_info = CertificateInfo(**data)
         except (json.JSONDecodeError, TypeError, ValueError) as e:
             logger.warning(f"Failed to parse LLM response: {e}")
@@ -185,8 +185,29 @@ class LLMExtractor:
             raw_text=raw_text or (content[:500] if method == "text" else None),
         )
 
-    def extract_from_text(self, text: str, file_name: str, page_num: int) -> ExtractionResult:
-        prompt = f"""Extract certificate information from this text. Return JSON with these fields:
+    def _build_prompt(self, is_image: bool = False) -> str:
+        """Build extraction prompt based on configured fields"""
+        fields = get_extraction_fields()
+
+        if not fields:
+            if is_image:
+                return """Extract certificate information from this certificate image. Return JSON with these fields:
+- certificate_number
+- product_name
+- product_model
+- manufacturer
+- issuing_authority
+- issue_date
+- expiry_date
+- certification_type (e.g., 3C, CE, FCC, UL)
+- standards (list of applicable standards)
+- country
+- language
+
+Pay attention to text in logos, stamps, seals, and tables. If a field is not found, use null.
+Return only a single JSON object, no markdown or extra commentary."""
+            else:
+                return """Extract certificate information from this text. Return JSON with these fields:
 - certificate_number
 - product_name
 - product_model
@@ -200,10 +221,34 @@ class LLMExtractor:
 - language
 
 If a field is not found, use null. Be precise with dates and numbers.
-Return only a single JSON object, no markdown or extra commentary.
+Return only a single JSON object, no markdown or extra commentary."""
 
-Text:
-{text}"""
+        field_lines = []
+        for field_name, field_config in fields.items():
+            desc = field_config.get("description", "")
+            required = field_config.get("required", False)
+            field_type = field_config.get("type", "string")
+            type_str = " (list)" if field_type == "list" else ""
+            required_str = " (required)" if required else ""
+            field_lines.append(f"- {field_name}{type_str}{required_str}: {desc}")
+
+        fields_desc = "\n".join(field_lines)
+
+        if is_image:
+            return f"""Extract certificate information from this certificate image. Return JSON with these fields:
+{fields_desc}
+
+Pay attention to text in logos, stamps, seals, and tables. If a field is not found, use null.
+Return only a single JSON object, no markdown or extra commentary."""
+        else:
+            return f"""Extract certificate information from this text. Return JSON with these fields:
+{fields_desc}
+
+If a field is not found, use null. Be precise with dates and numbers.
+Return only a single JSON object, no markdown or extra commentary."""
+
+    def extract_from_text(self, text: str, file_name: str, page_num: int) -> ExtractionResult:
+        prompt = self._build_prompt(is_image=False) + f"\n\nText:\n{text}"
 
         try:
             if self.provider == "anthropic":
@@ -238,21 +283,7 @@ Text:
         return self._build_result(content, file_name, page_num, "text", text[:500])
 
     def extract_from_image(self, image_base64: str, file_name: str, page_num: int) -> ExtractionResult:
-        prompt = """Extract certificate information from this certificate image. Return JSON with these fields:
-- certificate_number
-- product_name
-- product_model
-- manufacturer
-- issuing_authority
-- issue_date
-- expiry_date
-- certification_type (e.g., 3C, CE, FCC, UL)
-- standards (list of applicable standards)
-- country
-- language
-
-Pay attention to text in logos, stamps, seals, and tables. If a field is not found, use null.
-Return only a single JSON object, no markdown or extra commentary."""
+        prompt = self._build_prompt(is_image=True)
 
         try:
             if self.provider == "anthropic":

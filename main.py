@@ -1,14 +1,20 @@
 import os
 import json
 import logging
-from typing import List, Optional
+from contextlib import contextmanager
+from typing import List, Optional, Dict, Any, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from processors.pdf_processor import PDFProcessor
 from extractors.llm_extractor import LLMExtractor
-from models.schemas import CertificateInfo, ExtractionResult
+from models.schemas import (
+    CertificateInfo, ExtractionResult,
+    get_extraction_fields, set_extraction_fields,
+)
 from config import load_config
 
 logger = logging.getLogger(__name__)
+
+FieldsType = Union[List[str], List[Dict[str, Any]], Dict[str, Any], None]
 
 _CORE_FIELDS = (
     "certificate_number",
@@ -24,11 +30,28 @@ def _filled_core_count(cert_info) -> int:
     return sum(1 for k in _CORE_FIELDS if d.get(k))
 
 
+@contextmanager
+def _scoped_fields(fields: FieldsType):
+    """Temporarily override extraction fields, restore after."""
+    if not fields:
+        yield
+        return
+    prev = get_extraction_fields()
+    set_extraction_fields(fields)
+    try:
+        yield
+    finally:
+        set_extraction_fields(prev or None)
+
+
 class CertificateExtractor:
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, fields: FieldsType = None):
         cfg = load_config(config_path)
-        llm_cfg = cfg["llm"]
         ext_cfg = cfg["extraction"]
+
+        if fields:
+            set_extraction_fields(fields)
+
         self.pdf_processor = PDFProcessor(
             dpi=ext_cfg.get("dpi", 150),
             min_text_length=ext_cfg.get("min_text_length", 100),
@@ -90,46 +113,65 @@ class CertificateExtractor:
                 data=CertificateInfo(),
             )
 
-    def process_pdf(self, pdf_path: str, display_name: Optional[str] = None) -> List[ExtractionResult]:
+    def process_pdf(
+        self,
+        pdf_path: str,
+        display_name: Optional[str] = None,
+        fields: FieldsType = None,
+    ) -> List[ExtractionResult]:
+        """Extract from PDF. `fields` override config per-call.
+
+        fields accepts:
+        - list of str: ["证书编号", "产品名称"]
+        - dict simple: {"serial": "序列号"}
+        - dict full: {"serial": {"description": "序列号", "required": True}}
+        """
         file_name = display_name or os.path.basename(pdf_path)
-        pages = list(self.pdf_processor.extract_all_pages(pdf_path))
-        total = len(pages)
-        print(f"Processing {total} pages with {self.max_workers} workers...")
 
-        results = [None] * total
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {}
-            for idx, (page_num, text, image_base64) in enumerate(pages):
-                future = executor.submit(
-                    self._process_page,
-                    page_num,
-                    text,
-                    image_base64,
-                    file_name,
-                    pdf_path,
-                )
-                futures[future] = idx
+        with _scoped_fields(fields):
+            pages = list(self.pdf_processor.extract_all_pages(pdf_path))
+            total = len(pages)
+            print(f"Processing {total} pages with {self.max_workers} workers...")
 
-            for future in as_completed(futures):
-                idx = futures[future]
-                try:
-                    results[idx] = future.result()
-                    print(f"  Page {pages[idx][0]} done ({idx+1}/{total})")
-                except Exception as e:
-                    logger.error(f"Page {pages[idx][0]} failed: {e}")
-                    results[idx] = ExtractionResult(
-                        file_name=file_name, page_number=pages[idx][0],
-                        extraction_method="error", confidence=0.0,
-                        data=CertificateInfo(),
+            results: List[Optional[ExtractionResult]] = [None] * total
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = {}
+                for idx, (page_num, text, image_base64) in enumerate(pages):
+                    future = executor.submit(
+                        self._process_page,
+                        page_num,
+                        text,
+                        image_base64,
+                        file_name,
+                        pdf_path,
                     )
+                    futures[future] = idx
+
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    try:
+                        results[idx] = future.result()
+                        print(f"  Page {pages[idx][0]} done ({idx+1}/{total})")
+                    except Exception as e:
+                        logger.error(f"Page {pages[idx][0]} failed: {e}")
+                        results[idx] = ExtractionResult(
+                            file_name=file_name, page_number=pages[idx][0],
+                            extraction_method="error", confidence=0.0,
+                            data=CertificateInfo(),
+                        )
 
         return results
 
-    def _check_missing_fields(self, cert_info) -> List[str]:
+    def _check_missing_fields(self, cert_info) -> list:
+        fields = get_extraction_fields()
+        required = [name for name, cfg in fields.items() if cfg.get("required", False)]
         missing = []
-        for field_name, value in cert_info.model_dump().items():
-            if value is None and field_name != "additional_info":
-                missing.append(field_name)
+        for name in required:
+            val = getattr(cert_info, name, None)
+            if val is None:
+                extras = getattr(cert_info, "__pydantic_extra__", {}) or {}
+                if extras.get(name) is None:
+                    missing.append(name)
         return missing
 
     def save_results(self, results: List[ExtractionResult], output_path: str):
@@ -148,7 +190,12 @@ class CertificateExtractor:
 
         print(f"Results saved to {output_path}")
 
-    def process_directory(self, input_dir: str, output_dir: str = "output"):
+    def process_directory(
+        self,
+        input_dir: str,
+        output_dir: str = "output",
+        fields: FieldsType = None,
+    ):
         os.makedirs(output_dir, exist_ok=True)
 
         for filename in os.listdir(input_dir):
@@ -160,7 +207,7 @@ class CertificateExtractor:
             print("=" * 50)
 
             try:
-                results = self.process_pdf(pdf_path)
+                results = self.process_pdf(pdf_path, fields=fields)
                 output_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}_extracted.json")
                 self.save_results(results, output_path)
             except Exception as e:

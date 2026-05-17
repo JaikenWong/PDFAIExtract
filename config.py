@@ -34,6 +34,7 @@ _DEFAULT_CONFIG = {
         "dpi": 150,
         "max_upload_bytes": 52428800,
         "vision_fallback_min_chars": 30,
+        "fields": {},
     },
 }
 
@@ -94,6 +95,14 @@ def _env_config() -> dict:
             env_cfg["extraction"][key] = int(value)
         elif key in {"retry_delay", "min_text_alpha_ratio"}:
             env_cfg["extraction"][key] = float(value)
+
+    # Support custom extraction fields via JSON string
+    fields_json = os.getenv("EXTRACTION_FIELDS")
+    if fields_json:
+        try:
+            env_cfg["extraction"]["fields"] = json.loads(fields_json)
+        except json.JSONDecodeError:
+            pass
 
     return env_cfg
 
